@@ -201,19 +201,18 @@
             box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
             transition: all 0.3s;
             user-select: none;
-            touch-action: none;
+            touch-action: manipulation;
             position: relative;
         }
         
-        .item-card.dragging {
-            opacity: 0.7;
+        .item-card.selected {
             transform: scale(1.05);
-            z-index: 1000;
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+            border: 2px solid #3498db;
+            z-index: 10;
         }
         
         .item-card.placed {
-            cursor: pointer;
             opacity: 0.9;
         }
         
@@ -421,14 +420,14 @@
             font-size: 1.2rem;
         }
         
-        .drag-instruction {
-            background-color: #fff8e1;
-            color: #ff8f00;
+        .tap-instruction {
+            background-color: #e8f5e9;
+            color: #2e7d32;
             padding: 10px;
             border-radius: 10px;
             margin-bottom: 15px;
             text-align: center;
-            border: 1px solid #ffecb3;
+            border: 1px solid #c8e6c9;
             font-size: 0.9rem;
             display: flex;
             align-items: center;
@@ -436,9 +435,40 @@
             gap: 10px;
         }
         
-        .drag-instruction::before {
+        .tap-instruction::before {
+            content: "👆";
+            font-size: 1.2rem;
+        }
+        
+        .selected-item-info {
+            background-color: #fff3e0;
+            color: #ef6c00;
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            text-align: center;
+            border: 1px solid #ffe0b2;
+            font-size: 0.9rem;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .selected-item-info.show {
+            display: flex;
+        }
+        
+        .selected-item-info::before {
             content: "👉";
             font-size: 1.2rem;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
         }
         
         @media (max-width: 768px) {
@@ -507,21 +537,28 @@
             }
         }
         
-        /* Стили для drag-and-drop на мобильных устройствах */
-        .dragging-over {
+        /* Стили для выбранного элемента */
+        .drop-zone.highlighted {
             background-color: rgba(52, 152, 219, 0.1) !important;
             border-color: #3498db !important;
+            border-style: solid !important;
+            animation: border-pulse 1.5s infinite;
         }
         
-        /* Фиксированная позиция для перетаскиваемого элемента */
-        .item-card.dragging {
-            position: fixed !important;
-            pointer-events: none !important;
+        @keyframes border-pulse {
+            0% { border-color: #3498db; }
+            50% { border-color: #2ecc71; }
+            100% { border-color: #3498db; }
         }
         
-        /* Скрываем элемент при перетаскивании */
-        .item-card.drag-original {
-            opacity: 0.4;
+        .item-card.to-delete {
+            animation: shake 0.5s ease-in-out;
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
         }
     </style>
 </head>
@@ -556,8 +593,12 @@
                 Все предметы появляются в случайном порядке!
             </div>
             
-            <div class="drag-instruction">
-                Нажмите и удерживайте предмет, чтобы переместить его в нужную комнату
+            <div class="tap-instruction">
+                Дважды нажмите на предмет, чтобы выбрать его, затем нажмите на комнату для размещения
+            </div>
+            
+            <div class="selected-item-info" id="selected-info-1">
+                Выбран предмет: <span id="selected-item-name-1"></span>
             </div>
             
             <p style="text-align: center; margin-bottom: 15px; color: #2c3e50;">
@@ -608,8 +649,12 @@
                 Все предметы появляются в случайном порядке!
             </div>
             
-            <div class="drag-instruction">
-                Нажмите и удерживайте предмет, чтобы переместить его в нужную комнату
+            <div class="tap-instruction">
+                Дважды нажмите на предмет, чтобы выбрать его, затем нажмите на комнату для размещения
+            </div>
+            
+            <div class="selected-item-info" id="selected-info-2">
+                Выбран предмет: <span id="selected-item-name-2"></span>
             </div>
             
             <p style="text-align: center; margin-bottom: 15px; color: #2c3e50;">
@@ -739,11 +784,9 @@
                 "bathroom": [],
                 "kitchen": []
             },
-            // Переменные для touch-событий
-            dragItem: null,
-            dragClone: null,
-            touchStartX: 0,
-            touchStartY: 0
+            // Выбранный предмет для текущей фазы
+            selectedItem: null,
+            selectedPhase: null
         };
 
         // Функция для перемешивания массива (алгоритм Фишера-Йетса)
@@ -817,11 +860,9 @@
                 },
                 totalItems: 0,
                 matches: 0,
-                currentItems: gameState.currentItems, // Сохраняем текущие предметы
-                dragItem: null,
-                dragClone: null,
-                touchStartX: 0,
-                touchStartY: 0
+                currentItems: gameState.currentItems,
+                selectedItem: null,
+                selectedPhase: null
             };
             
             // Подсчет общего количества предметов
@@ -843,6 +884,9 @@
             // Обновить индикатор фазы
             updatePhaseIndicator();
             
+            // Скрыть информацию о выбранном предмете
+            hideSelectedInfo();
+            
             // Прокрутить вверх
             document.querySelector('.container').scrollTop = 0;
         }
@@ -859,6 +903,23 @@
             
             // Обновить состояние
             gameState.phase = phaseNumber;
+            
+            // Сбросить выбранный предмет
+            gameState.selectedItem = null;
+            gameState.selectedPhase = null;
+            
+            // Снять выделение со всех карточек
+            document.querySelectorAll('.item-card.selected').forEach(card => {
+                card.classList.remove('selected');
+            });
+            
+            // Убрать подсветку с зон сброса
+            document.querySelectorAll('.drop-zone.highlighted').forEach(zone => {
+                zone.classList.remove('highlighted');
+            });
+            
+            // Скрыть информацию о выбранном предмете
+            hideSelectedInfo();
             
             // Инициализировать карточки для фазы 2, если нужно
             if (phaseNumber === 2) {
@@ -916,8 +977,8 @@
                     card.appendChild(imageContainer);
                     card.appendChild(nameElement);
                     
-                    // Добавить обработчики для touch-событий
-                    setupTouchEvents(card, phaseNumber);
+                    // Добавить обработчики для двойного нажатия
+                    setupDoubleTapEvents(card, phaseNumber);
                     
                     allCards.push(card);
                 });
@@ -930,190 +991,200 @@
             shuffledCards.forEach(card => {
                 container.appendChild(card);
             });
+            
+            // Настроить зоны сброса для фазы
+            setupDropZones(phaseNumber);
         }
 
-        // Настройка touch-событий для карточек
-        function setupTouchEvents(card, phaseNumber) {
-            let touchStartTime = 0;
-            let isDragging = false;
-            let touchStartX = 0;
-            let touchStartY = 0;
-            let dragClone = null;
+        // Настроить зоны сброса для фазы
+        function setupDropZones(phaseNumber) {
+            const dropZones = document.querySelectorAll(`#phase${phaseNumber} .drop-zone`);
             
-            // Обработчик начала касания
+            dropZones.forEach(zone => {
+                // Очистить обработчики событий
+                zone.replaceWith(zone.cloneNode(true));
+            });
+            
+            // Получить обновленные зоны
+            const updatedZones = document.querySelectorAll(`#phase${phaseNumber} .drop-zone`);
+            
+            updatedZones.forEach(zone => {
+                zone.addEventListener('click', (e) => handleDropZoneClick(e, zone, phaseNumber));
+                zone.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    handleDropZoneClick(e, zone, phaseNumber);
+                }, { passive: false });
+            });
+        }
+
+        // Настройка обработчиков для двойного нажатия
+        function setupDoubleTapEvents(card, phaseNumber) {
+            let lastTap = 0;
+            let tapCount = 0;
+            let tapTimeout;
+            
+            // Обработчик для обычных кликов (для десктопа)
+            card.addEventListener('click', function(e) {
+                e.stopPropagation();
+                handleCardSelection(this, phaseNumber);
+            });
+            
+            // Обработчик для touch-событий (для мобильных устройств)
             card.addEventListener('touchstart', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
                 
-                const touch = e.touches[0];
-                touchStartTime = Date.now();
-                touchStartX = touch.clientX;
-                touchStartY = touch.clientY;
-                isDragging = false;
+                const currentTime = new Date().getTime();
+                const tapLength = currentTime - lastTap;
                 
-                // Запоминаем элемент для перетаскивания
-                gameState.dragItem = this;
-                gameState.touchStartX = touchStartX;
-                gameState.touchStartY = touchStartY;
-                
-                // Добавляем класс для визуальной обратной связи
-                this.classList.add('drag-original');
-            }, { passive: false });
-            
-            // Обработчик движения при касании
-            card.addEventListener('touchmove', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                if (!gameState.dragItem || gameState.dragItem !== this) return;
-                
-                const touch = e.touches[0];
-                const deltaX = Math.abs(touch.clientX - touchStartX);
-                const deltaY = Math.abs(touch.clientY - touchStartY);
-                
-                // Если движение достаточно большое, начинаем перетаскивание
-                if ((deltaX > 10 || deltaY > 10) && !isDragging) {
-                    isDragging = true;
-                    startDrag(this, touch.clientX, touch.clientY, phaseNumber);
+                // Сброс таймера при слишком долгом промежутке
+                if (tapCount > 0 && tapLength > 500) {
+                    tapCount = 0;
                 }
                 
-                // Обновляем позицию перетаскиваемого элемента
-                if (isDragging && dragClone) {
-                    dragClone.style.left = (touch.clientX - 50) + 'px';
-                    dragClone.style.top = (touch.clientY - 50) + 'px';
-                    
-                    // Проверяем, над какой зоной сброса находимся
-                    const dropZones = document.querySelectorAll(`#phase${phaseNumber} .drop-zone`);
-                    let foundDropZone = null;
-                    
-                    dropZones.forEach(zone => {
-                        const rect = zone.getBoundingClientRect();
-                        if (touch.clientX >= rect.left && touch.clientX <= rect.right &&
-                            touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
-                            zone.classList.add('dragging-over');
-                            foundDropZone = zone;
-                        } else {
-                            zone.classList.remove('dragging-over');
-                        }
-                    });
-                    
-                    // Сохраняем текущую зону сброса
-                    gameState.currentDropZone = foundDropZone;
-                }
-            }, { passive: false });
-            
-            // Обработчик окончания касания
-            card.addEventListener('touchend', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
+                tapCount++;
                 
-                // Убираем визуальную обратную связь
-                this.classList.remove('drag-original');
-                
-                // Если был drag & drop
-                if (isDragging && dragClone) {
-                    endDrag(this, phaseNumber);
-                } else {
-                    // Если был просто тап (короткое нажатие)
-                    const touchTime = Date.now() - touchStartTime;
-                    if (touchTime < 300) {
-                        // Короткое нажатие - удаление предмета, если он уже размещен
+                if (tapCount === 1) {
+                    // Первое нажатие - запускаем таймер
+                    tapTimeout = setTimeout(() => {
+                        tapCount = 0;
+                        // Одиночное нажатие - удаление, если предмет размещен
                         if (this.classList.contains('placed')) {
-                            this.remove();
-                            updatePlayerLayout(phaseNumber);
+                            this.classList.add('to-delete');
+                            setTimeout(() => {
+                                this.remove();
+                                updatePlayerLayout(phaseNumber);
+                                // Если это был выбранный предмет, сбросить выбор
+                                if (gameState.selectedItem === this) {
+                                    gameState.selectedItem = null;
+                                    gameState.selectedPhase = null;
+                                    hideSelectedInfo();
+                                }
+                            }, 500);
                         }
-                    }
+                    }, 500);
                 }
                 
-                // Сбрасываем состояние
-                isDragging = false;
-                gameState.dragItem = null;
-                
-                // Убираем подсветку со всех зон сброса
-                document.querySelectorAll('.drop-zone').forEach(zone => {
-                    zone.classList.remove('dragging-over');
-                });
-                
-                // Удаляем клон, если он есть
-                if (dragClone) {
-                    dragClone.remove();
-                    dragClone = null;
+                if (tapCount === 2) {
+                    // Второе нажатие в течение 500 мс - двойное нажатие
+                    clearTimeout(tapTimeout);
+                    tapCount = 0;
+                    handleCardSelection(this, phaseNumber);
                 }
+                
+                lastTap = currentTime;
             }, { passive: false });
-            
-            // Обработчик отмены касания
-            card.addEventListener('touchcancel', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Убираем визуальную обратную связь
-                this.classList.remove('drag-original');
-                
-                // Сбрасываем состояние
-                isDragging = false;
-                gameState.dragItem = null;
-                
-                // Убираем подсветку со всех зон сброса
-                document.querySelectorAll('.drop-zone').forEach(zone => {
-                    zone.classList.remove('dragging-over');
-                });
-                
-                // Удаляем клон, если он есть
-                if (dragClone) {
-                    dragClone.remove();
-                    dragClone = null;
-                }
-            }, { passive: false });
-            
-            // Функция начала перетаскивания
-            function startDrag(element, x, y, phaseNumber) {
-                // Создаем клон элемента для перетаскивания
-                dragClone = element.cloneNode(true);
-                dragClone.className = 'item-card dragging';
-                dragClone.style.position = 'fixed';
-                dragClone.style.left = (x - 50) + 'px';
-                dragClone.style.top = (y - 50) + 'px';
-                dragClone.style.width = element.offsetWidth + 'px';
-                dragClone.style.zIndex = '10000';
-                dragClone.style.pointerEvents = 'none';
-                
-                document.body.appendChild(dragClone);
+        }
+
+        // Обработка выбора карточки
+        function handleCardSelection(card, phaseNumber) {
+            // Если предмет уже выбран, снимаем выделение
+            if (gameState.selectedItem === card && gameState.selectedPhase === phaseNumber) {
+                card.classList.remove('selected');
+                gameState.selectedItem = null;
+                gameState.selectedPhase = null;
+                hideSelectedInfo();
+                return;
             }
             
-            // Функция завершения перетаскивания
-            function endDrag(element, phaseNumber) {
-                if (gameState.currentDropZone) {
-                    // Удаляем предмет из предыдущего места, если он уже был размещен
-                    const itemCards = document.querySelectorAll(`#phase${phaseNumber} .item-card[data-item-id="${element.dataset.itemId}"]`);
-                    
-                    itemCards.forEach(card => {
-                        if (card.classList.contains('placed') && card !== element) {
-                            card.remove();
-                        }
-                    });
-                    
-                    // Если элемент еще не размещен, создаем новую карточку
-                    if (!element.classList.contains('placed')) {
-                        const newCard = element.cloneNode(true);
-                        newCard.className = 'item-card placed';
-                        newCard.dataset.phase = phaseNumber;
-                        
-                        // Настраиваем touch-события для новой карточки
-                        setupTouchEvents(newCard, phaseNumber);
-                        
-                        gameState.currentDropZone.appendChild(newCard);
-                    } else {
-                        // Если элемент уже размещен, просто перемещаем его
-                        gameState.currentDropZone.appendChild(element);
+            // Снимаем выделение с предыдущей карточки
+            if (gameState.selectedItem) {
+                gameState.selectedItem.classList.remove('selected');
+            }
+            
+            // Выделяем новую карточку
+            card.classList.add('selected');
+            gameState.selectedItem = card;
+            gameState.selectedPhase = phaseNumber;
+            
+            // Показываем информацию о выбранном предмете
+            showSelectedInfo(card, phaseNumber);
+            
+            // Подсвечиваем зоны сброса
+            highlightDropZones(phaseNumber);
+        }
+
+        // Показать информацию о выбранном предмете
+        function showSelectedInfo(card, phaseNumber) {
+            const infoElement = document.getElementById(`selected-info-${phaseNumber}`);
+            const nameElement = document.getElementById(`selected-item-name-${phaseNumber}`);
+            
+            if (infoElement && nameElement) {
+                nameElement.textContent = card.dataset.itemName;
+                infoElement.classList.add('show');
+            }
+        }
+
+        // Скрыть информацию о выбранном предмете
+        function hideSelectedInfo() {
+            document.querySelectorAll('.selected-item-info').forEach(info => {
+                info.classList.remove('show');
+            });
+        }
+
+        // Подсветить зоны сброса
+        function highlightDropZones(phaseNumber) {
+            // Убираем подсветку со всех зон
+            document.querySelectorAll('.drop-zone').forEach(zone => {
+                zone.classList.remove('highlighted');
+            });
+            
+            // Подсвечиваем зоны для текущей фазы
+            document.querySelectorAll(`#phase${phaseNumber} .drop-zone`).forEach(zone => {
+                zone.classList.add('highlighted');
+            });
+        }
+
+        // Обработка клика по зоне сброса
+        function handleDropZoneClick(e, zone, phaseNumber) {
+            e.stopPropagation();
+            
+            // Если есть выбранный предмет для этой фазы
+            if (gameState.selectedItem && gameState.selectedPhase === phaseNumber) {
+                const selectedCard = gameState.selectedItem;
+                const room = zone.dataset.room;
+                const itemId = selectedCard.dataset.itemId;
+                
+                // Проверить, не находится ли уже этот предмет в какой-либо зоне
+                const itemCards = document.querySelectorAll(`#phase${phaseNumber} .item-card[data-item-id="${itemId}"]`);
+                
+                // Если предмет уже размещен, удалить его из предыдущей зоны
+                itemCards.forEach(card => {
+                    if (card.classList.contains('placed') && card !== selectedCard) {
+                        card.remove();
                     }
+                });
+                
+                // Если элемент еще не размещен, создаем новую карточку
+                if (!selectedCard.classList.contains('placed')) {
+                    const newCard = selectedCard.cloneNode(true);
+                    newCard.className = 'item-card placed';
+                    newCard.dataset.phase = phaseNumber;
                     
-                    // Обновляем расположение в состоянии игры
-                    updatePlayerLayout(phaseNumber);
+                    // Настраиваем обработчики для новой карточки
+                    setupDoubleTapEvents(newCard, phaseNumber);
+                    
+                    zone.appendChild(newCard);
+                } else {
+                    // Если элемент уже размещен, просто перемещаем его
+                    zone.appendChild(selectedCard);
                 }
                 
-                // Убираем подсветку
-                gameState.currentDropZone?.classList.remove('dragging-over');
-                gameState.currentDropZone = null;
+                // Обновляем расположение в состоянии игры
+                updatePlayerLayout(phaseNumber);
+                
+                // Снимаем выделение с карточки
+                selectedCard.classList.remove('selected');
+                gameState.selectedItem = null;
+                gameState.selectedPhase = null;
+                
+                // Убираем подсветку с зон сброса
+                document.querySelectorAll('.drop-zone.highlighted').forEach(z => {
+                    z.classList.remove('highlighted');
+                });
+                
+                // Скрываем информацию о выбранном предмете
+                hideSelectedInfo();
             }
         }
 
@@ -1345,6 +1416,13 @@
                     "kitchen": []
                 };
                 
+                // Сбросить выбранный предмет
+                if (gameState.selectedPhase === 1) {
+                    gameState.selectedItem = null;
+                    gameState.selectedPhase = null;
+                    hideSelectedInfo();
+                }
+                
                 // Перемешать карточки снова
                 initItemCards(1);
             });
@@ -1352,13 +1430,6 @@
             document.getElementById('play-again').addEventListener('click', () => {
                 initGame();
             });
-            
-            // Предотвращаем стандартное поведение браузера для touch-событий
-            document.addEventListener('touchmove', function(e) {
-                if (gameState.dragItem) {
-                    e.preventDefault();
-                }
-            }, { passive: false });
         });
     </script>
 </body>
